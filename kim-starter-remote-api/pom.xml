@@ -13,6 +13,9 @@
 
     <artifactId>kim-starter-remote-api</artifactId>
 
+    <properties>
+        <kim-common.version>1.0-SNAPSHOT</kim-common.version>
+    </properties>
 
     <dependencies>
         <!--springcloud-->
@@ -20,5 +23,24 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+
+        <dependency>
+            <groupId>io.github.chengmboy</groupId>
+            <artifactId>common</artifactId>
+            <version>${kim-common.version}</version>
+        </dependency>
+
+        <!--SpringFox dependencies -->
+        <dependency>
+            <groupId>io.springfox</groupId>
+            <artifactId>springfox-swagger2</artifactId>
+            <version>${springfox-version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.springfox</groupId>
+            <artifactId>springfox-swagger-ui</artifactId>
+            <version>${springfox-version}</version>
+        </dependency>
+
     </dependencies>
 </project>

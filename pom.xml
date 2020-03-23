@@ -18,6 +18,7 @@
         <module>kim-uc</module>
         <module>kim-starter-service</module>
         <module>kim-starter-remote-api</module>
+        <module>kim-payment</module>
     </modules>
 
 
