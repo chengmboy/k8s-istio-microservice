@@ -135,7 +135,7 @@ kiali-7964898d8c-jrh62                    1/1     Running   0          82s
 prometheus-586d4445c7-8sm4n               1/1     Running   0          82s
 
 ```
-10. 使用Istio管控当前kim微服务集群
+10. 使用Istio管控当前kim微服务集群[更多Istio样例](./docs/Istio/README.md)
 ```bash
 # 给gateway注入Sidecar。
 kubectl get deployments kim-gateway-service -o yaml| istioctl kube-inject -f - | kubectl apply -f -
