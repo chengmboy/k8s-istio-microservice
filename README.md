@@ -155,5 +155,7 @@ curl http://localhost/health
 
 ## 公众号
 
+更多微服务相关信息，请关注公众号，不定时分享干货
+
 ![二维码](docs/images/二维码.png)
 

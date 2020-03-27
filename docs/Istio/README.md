@@ -1,6 +1,6 @@
 # kim Istio discovery
 ## 流量管控
-###1. 请求路由
+###请求路由
 
 默认的请求路由是采用轮询，我们这里使用Istio实现根据版本进行路由
 
@@ -83,7 +83,7 @@ curl --request GET 'http://localhost/payment/balance/query' --header 'end-user: 
 ```
 
 
-### 2. 根据用户身份进行路由
+###根据用户身份进行路由
 
 ```bash
 # 项目设置header中的end-user为用户名，配置根据用户名来路由,v2版本会返回邮箱，v1没有返回邮箱
@@ -107,7 +107,7 @@ curl --request GET 'http://localhost/payment/balance/query' --header 'end-user: 
 {"requestId":"5c47fab6698e64d1","code":200,"message":null,"data":"Hello v1, cheng!, id: 1 "}
 ```
 
-## 故障注入
+### 故障注入
 
 可以模拟故障，测试应用健壮性
 
@@ -233,7 +233,7 @@ kubectl apply -f script/Istio/circuit-breaking.yaml
 
 ```
 
-# 给gateway的deployment增加标注，使可以看到Istio更详细的代理信息
+给gateway的deployment增加标注，使可以看到Istio更详细的代理信息
 ```bash
 # 这里需要注意是要加在template下的metadata下的annotations。我就因为加到了Deployment下
 的metadata的annotations导致一直看不到kim-payment-service的代理信息。
@@ -245,9 +245,10 @@ spec:
  
 # 重新部署gateway
 kubectl apply -f <(istioctl kube-inject -f target/classes/META-INF/fabric8/kubernetes/kim-gateway-service-deployment.yml)
+
 ```
 
-# 使用fortio（golang编写负载均衡测试库）进行测试
+使用fortio（golang编写负载均衡测试库）进行测试
 
 ```bash
 
@@ -353,12 +354,12 @@ no healthy upstream
 镜像会将实时流量的副本发送到镜像服务。镜像流量发生在主要服务的关键请求路径的带外。
 
 1. 我们先把流量全部指向v1
-```bash
+​```bash
 kubectl apply -f script/Istio/virtual-service-all-v1.yaml
 ```
 
 2. 使用流量镜像，把v1的流量镜像到v2
-```bash
+​```bash
 kubectl apply -f script/Istio/mrroring.yaml
 
 ```
