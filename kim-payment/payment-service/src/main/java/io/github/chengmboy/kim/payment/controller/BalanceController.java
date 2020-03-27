@@ -37,7 +37,8 @@ public class BalanceController implements BalanceRemoteService {
         if (user == null) {
             return Response.ok("Hello anonymous user");
         }
-        return Response.ok(String.format("Hello, %s!, id: %s email: %s" , user.getName(),user.getId(),user.getEmail()));
+        return Response.ok(String.format("Hello v2, %s!, id: %s email: %s" , user.getName(),user.getId(),user.getEmail()));
+        //return Response.ok(String.format("Hello v1, %s!, id: %s " , user.getName(),user.getId()));
     }
 
     @Override

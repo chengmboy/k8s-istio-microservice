@@ -152,3 +152,8 @@ curl http://localhost/health
 {"status":"UP"}
 
 ```
+
+## 公众号
+
+![二维码](docs/images/二维码.png)
+

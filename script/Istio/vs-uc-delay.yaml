@@ -1,0 +1,16 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-uc-service
+spec:
+  hosts:
+    - kim-uc-service
+  http:
+    - fault:
+        delay:
+          fixedDelay: 3s
+          percentage:
+            value: 100
+      route:
+        - destination:
+            host: kim-uc-service

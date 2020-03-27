@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-payment-service
+spec:
+  hosts:
+    - kim-payment-service
+  http:
+    - route:
+        - destination:
+            host: kim-payment-service
+            subset: v2
+      timeout: 0.5s
+
