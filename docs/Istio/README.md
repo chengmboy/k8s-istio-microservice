@@ -68,7 +68,7 @@ DestinationRule这个是指定义路由规则，也就是定义subsets，在创�
 ```bash
 kubectl apply -f script/Istio/kim-destination-rule-all.yaml
 ```
-4.创建VirtualService
+4. 创建VirtualService
 
 这里将会指定路由
 
