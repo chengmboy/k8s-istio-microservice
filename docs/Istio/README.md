@@ -1,6 +1,6 @@
 # kim Istio discovery
 ## 流量管控
-###请求路由
+### 请求路由
 
 默认的请求路由是采用轮询，我们这里使用Istio实现根据版本进行路由
 
@@ -83,7 +83,7 @@ curl --request GET 'http://localhost/payment/balance/query' --header 'end-user: 
 ```
 
 
-###根据用户身份进行路由
+### 根据用户身份进行路由
 
 ```bash
 # 项目设置header中的end-user为用户名，配置根据用户名来路由,v2版本会返回邮箱，v1没有返回邮箱
@@ -348,7 +348,7 @@ curl --request GET 'http://localhost/payment/balance/query' --header 'Authorizat
 no healthy upstream
 ```
 
-###流量镜像
+### 流量镜像
 
 流量镜像（也称为阴影）是一个强大的概念，它使要素团队能够以最小的风险将更改引入生产。
 镜像会将实时流量的副本发送到镜像服务。镜像流量发生在主要服务的关键请求路径的带外。
