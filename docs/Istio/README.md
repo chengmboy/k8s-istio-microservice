@@ -354,12 +354,13 @@ no healthy upstream
 镜像会将实时流量的副本发送到镜像服务。镜像流量发生在主要服务的关键请求路径的带外。
 
 1. 我们先把流量全部指向v1
-​```bash
+```bash
 kubectl apply -f script/Istio/virtual-service-all-v1.yaml
-```
 
+```
 2. 使用流量镜像，把v1的流量镜像到v2
-​```bash
+
+```bash
 kubectl apply -f script/Istio/mrroring.yaml
 
 ```
