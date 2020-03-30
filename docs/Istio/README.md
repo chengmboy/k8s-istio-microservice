@@ -190,6 +190,7 @@ kubectl apply -f script/Istio/vs-uc-delay.yaml
 2. 这个时候访问payment服务，触发了payment的fallback,请求可以正常返回。
 
 3.设置payment的超时0.5s
+
 ```bash
 
   http:
@@ -378,6 +379,903 @@ kubectl logs kim-payment-service-v2-5f5c8b4fc6-bb76x -c istio-proxy  -f
 
 [2020-03-27T10:43:26.007Z] "GET /user/login/cheng HTTP/1.1" 200 - "-" "-" 0 745 10 8 "-" "Java/1.8.0_151" "c38b9ccf-f27f-91e5-b154-91cad01c4eb6" "kim-uc-service:8080" "10.1.2.82:8080" outbound|8080||kim-uc-service.default.svc.cluster.local - 10.98.51.223:8080 10.1.2.80:42404 - default
 [2020-03-27T10:43:25.964Z] "GET /balance/query HTTP/1.1" 200 - "-" "-" 0 112 64 57 "192.168.65.3, 127.0.0.1,10.1.2.88" "PostmanRuntime/7.23.0" "9cb9ed34-9f57-9117-8d67-eeb2aa34ee39" "kim-payment-service-shadow:8080" "127.0.0.1:8080" inbound|8080|http|kim-payment-service.default.svc.cluster.local - 10.1.2.80:8080 10.1.2.88:0 - default
-^C
+
 
 ```
+
+### 入口
+
+#### 入口网关
+
+#### 安全网关
+
+##### 单向认证
+
+准备证书
+
+```bash
+# 创建根证书
+openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 -subj '/O=example Inc./CN=example.com' -keyout example.com.key -out example.com.crt
+
+# 生成服务器证书请求
+openssl req -out kim.example.com.csr -newkey rsa:2048 -nodes -keyout kim.example.com.key -subj "/CN=kim.example.com/O=kim organization"
+
+# 使用根证书签发服务器证书
+openssl x509 -req -days 365 -CA example.com.crt -CAkey example.com.key -set_serial 0 -in kim.example.com.csr -out kim.example.com.crt
+
+# 查看目录
+ ll
+total 40
+-rw-r--r--  1 chengmboy  staff  1046 Mar 29 10:44 example.com.crt # 根证书
+-rw-r--r--  1 chengmboy  staff  1704 Mar 29 10:44 example.com.key # 根密钥
+-rw-r--r--  1 chengmboy  staff  1046 Mar 29 10:46 kim.example.com.crt # 服务器证书
+-rw-r--r--  1 chengmboy  staff   936 Mar 29 10:46 kim.example.com.csr # 服务器证书请求
+-rw-r--r--  1 chengmboy  staff  1704 Mar 29 10:46 kim.example.com.key # 服务器证书密钥
+
+# 创建k8s secret，注意secret的名字必须为istio-ingressgateway-certs，Istio的默认配置
+kubectl create -n istio-system secret tls istio-ingressgateway-certs --key kim.example.com.key --cert kim.example.com.crt
+
+# 查看Istio证书挂载情况
+kubectl exec -it -n istio-system $(kubectl -n istio-system get pods -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -- ls -al /etc/istio/ingressgateway-certs
+drwxrwxrwt 3 root root  120 Mar 29 02:52 .
+drwxr-xr-x 1 root root 4096 Mar 23 07:22 ..
+drwxr-xr-x 2 root root   80 Mar 29 02:52 ..2020_03_29_02_52_14.075686744
+lrwxrwxrwx 1 root root   31 Mar 29 02:52 ..data -> ..2020_03_29_02_52_14.075686744
+lrwxrwxrwx 1 root root   14 Mar 29 02:52 tls.crt -> ..data/tls.crt
+lrwxrwxrwx 1 root root   14 Mar 29 02:52 tls.key -> ..data/tls.key
+
+```
+
+修改网关配置
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        serverCertificate: /etc/istio/ingressgateway-certs/tls.crt
+        privateKey: /etc/istio/ingressgateway-certs/tls.key
+      hosts:
+        - "kim.example.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-gateway-service
+spec:
+  hosts:
+    - "kim.example.com"
+  gateways:
+    - kim-gateway
+  http:
+   - route:
+      - destination:
+          host: kim-gateway-service
+          port:
+            number: 8080
+# 生效配置
+kubectl apply -f ../gateway-tls.yaml
+
+```
+
+校验
+
+```
+curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=kim.example.com; O=kim organization
+*  start date: Mar 29 02:46:21 2020 GMT
+*  expire date: Mar 29 02:46:21 2021 GMT
+*  common name: kim.example.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7fb5dd809c00)
+> GET /health HTTP/2
+> Host:kim.example.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 03:35:07 GMT
+< x-envoy-upstream-service-time: 47
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host kim.example.com left intact
+{"status":"UP"}
+```
+
+##### 双向认证
+
+k8s挂载CA证书
+
+```
+kubectl create -n istio-system secret generic istio-ingressgateway-ca-certs --from-file=example.com.crt
+
+# 查看挂载情况
+kubectl exec -it -n istio-system $(kubectl -n istio-system get pods -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -- ls -al /etc/istio/ingressgateway-ca-certs
+total 4
+drwxrwxrwt 3 root root  100 Mar 29 03:39 .
+drwxr-xr-x 1 root root 4096 Mar 23 07:22 ..
+drwxr-xr-x 2 root root   60 Mar 29 03:39 ..2020_03_29_03_39_32.424301783
+lrwxrwxrwx 1 root root   31 Mar 29 03:39 ..data -> ..2020_03_29_03_39_32.424301783
+lrwxrwxrwx 1 root root   22 Mar 29 03:39 example.com.crt -> ..data/example.com.crt
+
+```
+
+修改gateway配置
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: MUTUAL
+        serverCertificate: /etc/istio/ingressgateway-certs/tls.crt
+        privateKey: /etc/istio/ingressgateway-certs/tls.key
+        caCertificates: /etc/istio/ingressgateway-ca-certs/example.com.crt
+      hosts:
+        - "kim.example.com"
+
+# 生效配置
+kubectl apply -f ../gateway-mutual-tls.yaml
+
+```
+
+验证
+
+```
+# 不带客户端证书
+curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Request CERT (13):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS alert, Server hello (2):
+* error:1401E410:SSL routines:CONNECT_CR_FINISHED:sslv3 alert handshake failure
+* stopped the pause stream!
+* Closing connection 0
+curl: (35) error:1401E410:SSL routines:CONNECT_CR_FINISHED:sslv3 alert handshake failure
+# 带客户端证书
+curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt --cert kim-client.example.com.crt --key kim-client.example.com.key  https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Request CERT (13):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS handshake, CERT verify (15):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=kim.example.com; O=kim organization
+*  start date: Mar 29 02:46:21 2020 GMT
+*  expire date: Mar 29 02:46:21 2021 GMT
+*  common name: kim.example.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7fdfa5000400)
+> GET /health HTTP/2
+> Host:kim.example.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 03:47:46 GMT
+< x-envoy-upstream-service-time: 44
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host kim.example.com left intact
+{"status":"UP"}
+```
+
+##### 为多个域名配置tls
+
+创建和部署新证书
+
+```
+openssl req -out bookinfo.com.csr -newkey rsa:2048 -nodes -keyout bookinfo.com.key -subj "/CN=bookinfo.com/O=bookinfo organization"
+openssl x509 -req -days 365 -CA example.com.crt -CAkey example.com.key -set_serial 0 -in bookinfo.com.csr -out bookinfo.com.crt
+
+# 创建secret
+kubectl create -n istio-system secret tls istio-ingressgateway-bookinfo-certs --key bookinfo.com.key --cert bookinfo.com.crt
+
+# 让istio-ingressgateway挂载新证书
+cat > gateway-patch.json <<EOF
+[{
+  "op": "add",
+  "path": "/spec/template/spec/containers/0/volumeMounts/0",
+  "value": {
+    "mountPath": "/etc/istio/ingressgateway-bookinfo-certs",
+    "name": "ingressgateway-bookinfo-certs",
+    "readOnly": true
+  }
+},
+{
+  "op": "add",
+  "path": "/spec/template/spec/volumes/0",
+  "value": {
+  "name": "ingressgateway-bookinfo-certs",
+    "secret": {
+      "secretName": "istio-ingressgateway-bookinfo-certs",
+      "optional": true
+    }
+  }
+}]
+EOF
+
+# 配置生效
+kubectl -n istio-system patch --type=json deploy istio-ingressgateway -p "$(cat gateway-patch.json)"
+
+# 查看
+ kubectl exec -it -n istio-system $(kubectl -n istio-system get pods -l istio=ingressgateway -o jsonpath='{.items[0].metadata.name}') -- ls -al /etc/istio/ingressgateway-bookinfo-certs
+total 4
+drwxrwxrwt 3 root root  120 Mar 29 13:00 .
+drwxr-xr-x 1 root root 4096 Mar 29 12:59 ..
+drwxr-xr-x 2 root root   80 Mar 29 13:00 ..2020_03_29_13_00_29.548204895
+lrwxrwxrwx 1 root root   31 Mar 29 13:00 ..data -> ..2020_03_29_13_00_29.548204895
+lrwxrwxrwx 1 root root   14 Mar 29 13:00 tls.crt -> ..data/tls.crt
+lrwxrwxrwx 1 root root   14 Mar 29 13:00 tls.key -> ..data/tls.key
+
+
+```
+
+创建新gateway文件
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: bookinfo-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        serverCertificate: /etc/istio/ingressgateway-bookinfo-certs/tls.crt
+        privateKey: /etc/istio/ingressgateway-bookinfo-certs/tls.key
+      hosts:
+        - "bookinfo.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: bookinfo-gateway-service
+spec:
+  hosts:
+    - "bookinfo.com"
+  gateways:
+    - bookinfo-gateway
+  http:
+    - route:
+        - destination:
+            host: kim-gateway-service
+            port:
+              number: 8080
+```
+
+ 验证
+
+```
+ -HHost:bookinfo.com --resolve bookinfo.com:443:127.0.0.1 --cacert example.com.crt https://bookinfo.com:443/health* Added bookinfo.com:443:127.0.0.1 to DNS cache
+* Hostname bookinfo.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to bookinfo.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=bookinfo.com; O=bookinfo organization
+*  start date: Mar 29 12:56:44 2020 GMT
+*  expire date: Mar 29 12:56:44 2021 GMT
+*  common name: bookinfo.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7fb11a005600)
+> GET /health HTTP/2
+> Host:bookinfo.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 13:17:14 GMT
+< x-envoy-upstream-service-time: 54
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host bookinfo.com left intact
+{"status":"UP"}
+
+# 验证之前的
+curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt --cert kim-client.example.com.crt --key kim-client.example.com.key  https://kim.example.com:443/health
+···
+{"status":"UP"}
+```
+
+####  密钥发现服务（SDS）
+
+开启密钥发现服务
+
+```
+istioctl manifest generate --profile=demo \
+--set values.gateways.istio-egressgateway.enabled=false \
+--set values.gateways.istio-ingressgateway.sds.enabled=true > \
+$HOME/istio-ingressgateway.yaml
+
+kubectl apply -f $HOME/istio-ingressgateway.yaml
+```
+
+创建密钥
+
+```
+kubectl create -n istio-system secret generic kim-credential --from-file=key=kim.example.com.key \
+--from-file=cert=kim.example.com.crt
+```
+
+创建网关
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: kim-credential # must be the same as secret
+      hosts:
+        - "kim.example.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-gateway-service
+spec:
+  hosts:
+    - "kim.example.com"
+  gateways:
+    - kim-gateway
+  http:
+    - route:
+        - destination:
+            host: kim-gateway-service
+            port:
+              number: 8080
+              
+# 生效配置
+
+kubectl apply -f ../gateway-sds.yaml
+
+```
+
+验证
+
+```
+ curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=kim.example.com; O=kim organization
+*  start date: Mar 29 02:46:21 2020 GMT
+*  expire date: Mar 29 02:46:21 2021 GMT
+*  common name: kim.example.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7fcb1180e000)
+> GET /health HTTP/2
+> Host:kim.example.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 13:52:55 GMT
+< x-envoy-upstream-service-time: 69
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host kim.example.com left intact
+{"status":"UP"}
+```
+
+##### 更换证书
+
+删除原来的密钥
+
+```
+kubectl delete secrets -n istio-system kim-credential
+```
+
+创建新证书
+
+```
+mkdir new_certificates
+openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 -subj '/O=example Inc./CN=example.com' -keyout new_certificates/example.com.key -out new_certificates/example.com.crt
+openssl req -out new_certificates/kim.example.com.csr -newkey rsa:2048 -nodes -keyout new_certificates/kim.example.com.key -subj "/CN=kim.example.com/O=kim organization"
+openssl x509 -req -days 365 -CA new_certificates/example.com.crt -CAkey new_certificates/example.com.key -set_serial 0 -in new_certificates/kim.example.com.csr -out new_certificates/kim.example.com.crt
+
+```
+
+部署新证书
+
+```
+kubectl create -n istio-system secret generic kim-credential \
+--from-file=key=new_certificates/kim.example.com.key \
+--from-file=cert=new_certificates/kim.example.com.crt
+```
+
+验证
+
+```
+ curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert new_certificates/example.com.crt https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: new_certificates/example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=kim.example.com; O=kim organization
+*  start date: Mar 29 13:51:59 2020 GMT
+*  expire date: Mar 29 13:51:59 2021 GMT
+*  common name: kim.example.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7ffde480d800)
+> GET /health HTTP/2
+> Host:kim.example.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 13:53:50 GMT
+< x-envoy-upstream-service-time: 17
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host kim.example.com left intact
+{"status":"UP"}
+# 使用原有的证书则会报错
+ curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt https://kim.example.com:443/health
+* Added kim.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS alert, Server hello (2):
+* error:04FFF06A:rsa routines:CRYPTO_internal:block type is not 01
+* stopped the pause stream!
+* Closing connection 0
+curl: (35) error:04FFF06A:rsa routines:CRYPTO_internal:block type is not 01
+
+```
+
+##### 多域名配置证书
+
+创建新证书
+
+```
+openssl req -out kim-new.example.com.csr -newkey rsa:2048 -nodes -keyout kim-new.example.com.key -subj "/CN=kim-new.example.com/O=helloworld organization"
+openssl x509 -req -days 365 -CA example.com.crt -CAkey example.com.key -set_serial 1 -in kim-new.example.com.csr -out kim-new.example.com.crt
+
+kubectl create -n istio-system secret generic kim-new-credential --from-file=key=kim-new.example.com.key \
+--from-file=cert=kim-new.example.com.crt
+```
+
+修改原有网关配置
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https-kim
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: kim-credential # must be the same as secret
+      hosts:
+        - "kim.example.com"
+    - port:
+        number: 443
+        name: https-kim-new
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: kim-new-credential # must be the same as secret
+      hosts:
+        - "kim-new.example.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-gateway-service
+spec:
+  hosts:
+    - "kim.example.com"
+    - "kim-new.example.com"
+  gateways:
+    - kim-gateway
+  http:
+    - route:
+        - destination:
+            host: kim-gateway-service
+            port:
+              number: 8080
+```
+
+验证
+
+```
+curl -v -HHost:kim-new.example.com --resolve kim-new.example.com:443:127.0.0.1 --cacert example.com.crt https://kimm:443/health.com
+{"status":"UP"}
+curl -v -HHost:kim.example.com --resolve kim.example.com:443:127.0.0.1 --cacert example.com.crt https://kim.example.com:443/health
+{"status":"UP"}
+```
+
+##### 双向认证
+
+删除原来的密钥
+
+```
+kubectl -n istio-system delete secret kim-new-credential
+
+```
+
+创建带有CA的密钥
+
+```
+kubectl create -n istio-system secret generic kim-new-credential --from-file=key=kim-new.example.com.key --from-file=cert=kim-new.example.com.crt --from-file=cacert=example.com.crt
+
+```
+
+修改gateway配置
+
+```
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https-kim
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: kim-credential # must be the same as secret
+      hosts:
+        - "kim.example.com"
+    - port:
+        number: 443
+        name: https-kim-new
+        protocol: HTTPS
+      tls:
+        mode: MUTUAL
+        credentialName: kim-new-credential # must be the same as secret
+      hosts:
+        - "kim-new.example.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-gateway-service
+spec:
+  hosts:
+    - "kim.example.com"
+    - "kim-new.example.com"
+  gateways:
+    - kim-gateway
+  http:
+    - route:
+        - destination:
+            host: kim-gateway-service
+            port:
+              number: 8080
+
+kubectl apply -f ../gateway-sds-mutual.yaml
+```
+
+验证
+
+```
+# 不带客户端证书
+curl -v -HHost:kim-new.example.com --resolve kim-new.example.com:443:127.0.0.1 --cacert example.com.crt https://kim-new.example.com:443/health
+* Added kim-new.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim-new.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim-new.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Request CERT (13):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS alert, Server hello (2):
+* error:1401E410:SSL routines:CONNECT_CR_FINISHED:sslv3 alert handshake failure
+* stopped the pause stream!
+* Closing connection 0
+curl: (35) error:1401E410:SSL routines:CONNECT_CR_FINISHED:sslv3 alert handshake failure
+
+# 带客户端证书
+curl -v -HHost:kim-new.example.com --resolve kim-new.example.com:443:127.0.0.1 --cacert example.com.crt --cert kim-client.example.com.crt --key kim-client.example.com.key  https://kim-new.example.com:443/health
+* Added kim-new.example.com:443:127.0.0.1 to DNS cache
+* Hostname kim-new.example.com was found in DNS cache
+*   Trying 127.0.0.1...
+* TCP_NODELAY set
+* Connected to kim-new.example.com (127.0.0.1) port 443 (#0)
+* ALPN, offering h2
+* ALPN, offering http/1.1
+* Cipher selection: ALL:!EXPORT:!EXPORT40:!EXPORT56:!aNULL:!LOW:!RC4:@STRENGTH
+* successfully set certificate verify locations:
+*   CAfile: example.com.crt
+  CApath: none
+* TLSv1.2 (OUT), TLS handshake, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Server hello (2):
+* TLSv1.2 (IN), TLS handshake, Certificate (11):
+* TLSv1.2 (IN), TLS handshake, Server key exchange (12):
+* TLSv1.2 (IN), TLS handshake, Request CERT (13):
+* TLSv1.2 (IN), TLS handshake, Server finished (14):
+* TLSv1.2 (OUT), TLS handshake, Certificate (11):
+* TLSv1.2 (OUT), TLS handshake, Client key exchange (16):
+* TLSv1.2 (OUT), TLS handshake, CERT verify (15):
+* TLSv1.2 (OUT), TLS change cipher, Client hello (1):
+* TLSv1.2 (OUT), TLS handshake, Finished (20):
+* TLSv1.2 (IN), TLS change cipher, Client hello (1):
+* TLSv1.2 (IN), TLS handshake, Finished (20):
+* SSL connection using TLSv1.2 / ECDHE-RSA-CHACHA20-POLY1305
+* ALPN, server accepted to use h2
+* Server certificate:
+*  subject: CN=kim-new.example.com; O=helloworld organization
+*  start date: Mar 29 14:05:06 2020 GMT
+*  expire date: Mar 29 14:05:06 2021 GMT
+*  common name: kim-new.example.com (matched)
+*  issuer: O=example Inc.; CN=example.com
+*  SSL certificate verify ok.
+* Using HTTP2, server supports multi-use
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+* Using Stream ID: 1 (easy handle 0x7ff472806c00)
+> GET /health HTTP/2
+> Host:kim-new.example.com
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+* Connection state changed (MAX_CONCURRENT_STREAMS updated)!
+< HTTP/2 200 
+< x-content-type-options: nosniff
+< x-xss-protection: 1; mode=block
+< cache-control: no-cache, no-store, max-age=0, must-revalidate
+< pragma: no-cache
+< expires: 0
+< content-type: application/vnd.spring-boot.actuator.v2+json;charset=UTF-8
+< date: Sun, 29 Mar 2020 14:20:10 GMT
+< x-envoy-upstream-service-time: 23
+< x-envoy-upstream-healthchecked-cluster: kim-gateway-service.default
+< server: istio-envoy
+< 
+* Connection #0 to host kim-new.example.com left intact
+{"status":"UP"}
+```
+

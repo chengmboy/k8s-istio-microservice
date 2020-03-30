@@ -1,0 +1,33 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: kim-gateway
+spec:
+  selector:
+    istio: ingressgateway # use istio default controller
+  servers:
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: kim-credential # must be the same as secret
+      hosts:
+        - "kim.example.com"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: kim-gateway-service
+spec:
+  hosts:
+    - "kim.example.com"
+  gateways:
+    - kim-gateway
+  http:
+    - route:
+        - destination:
+            host: kim-gateway-service
+            port:
+              number: 8080
